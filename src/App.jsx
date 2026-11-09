@@ -128,6 +128,109 @@ function AuthScreen() {
   )
 }
 
+
+function PasswordSetupScreen({ session, onComplete }) {
+  const [password, setPassword] = useState('')
+  const [confirmPassword, setConfirmPassword] = useState('')
+  const [showPassword, setShowPassword] = useState(false)
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState('')
+  const [message, setMessage] = useState('')
+
+  async function submit(event) {
+    event.preventDefault()
+    setError('')
+    setMessage('')
+
+    if (password.length < 8) {
+      setError('Heslo musí mít alespoň 8 znaků.')
+      return
+    }
+    if (password !== confirmPassword) {
+      setError('Zadaná hesla se neshodují.')
+      return
+    }
+
+    setLoading(true)
+    try {
+      const { data, error: updateError } = await supabase.auth.updateUser({
+        password,
+        data: {
+          ...(session?.user?.user_metadata || {}),
+          password_setup_complete: true
+        }
+      })
+
+      if (updateError) throw updateError
+      if (!data.user) throw new Error('Heslo se nepodařilo uložit. Zkus to znovu.')
+
+      onComplete(data.user)
+      setMessage('Heslo bylo nastaveno. Načítám tvoji kuchařku…')
+    } catch (err) {
+      setError(notifyError(err))
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  return (
+    <main className="auth-page">
+      <section className="auth-card">
+        <div className="auth-brand">
+          <span className="brand-mark"><BookOpen size={23} /></span>
+          <div><strong>Moje recepty</strong><small>Osobní digitální kuchařka</small></div>
+        </div>
+        <div className="auth-intro">
+          <p className="eyebrow">PRVNÍ PŘIHLÁŠENÍ</p>
+          <h1>Vytvoření hesla</h1>
+          <p>Vítej v kuchařce. Než začneš, nastav si vlastní heslo pro další přihlašování.</p>
+        </div>
+        <form onSubmit={submit} className="auth-form">
+          <label className="field">
+            <span>Nové heslo</span>
+            <div className="input-with-icon">
+              <LockKeyhole size={17} />
+              <input
+                type={showPassword ? 'text' : 'password'}
+                autoComplete="new-password"
+                minLength={8}
+                required
+                value={password}
+                onChange={event => setPassword(event.target.value)}
+                placeholder="Alespoň 8 znaků"
+              />
+              <button type="button" className="password-toggle" onClick={() => setShowPassword(value => !value)} aria-label="Zobrazit heslo">
+                {showPassword ? <EyeOff size={17} /> : <Eye size={17} />}
+              </button>
+            </div>
+          </label>
+          <label className="field">
+            <span>Potvrzení hesla</span>
+            <div className="input-with-icon">
+              <LockKeyhole size={17} />
+              <input
+                type={showPassword ? 'text' : 'password'}
+                autoComplete="new-password"
+                minLength={8}
+                required
+                value={confirmPassword}
+                onChange={event => setConfirmPassword(event.target.value)}
+                placeholder="Zadej heslo ještě jednou"
+              />
+            </div>
+          </label>
+          {error && <div className="notice error-notice"><AlertCircle size={17} />{error}</div>}
+          {message && <div className="notice success-notice"><Check size={17} />{message}</div>}
+          <button className="primary-button auth-submit" disabled={loading}>
+            {loading ? 'Ukládám heslo…' : 'Uložit heslo a pokračovat'}
+          </button>
+        </form>
+        <p className="auth-footnote">Toto nastavení se zobrazí pouze při prvním přihlášení přes pozvánku.</p>
+      </section>
+    </main>
+  )
+}
+
 function App() {
   const [session, setSession] = useState(null)
   const [authLoading, setAuthLoading] = useState(true)
@@ -487,6 +590,22 @@ function App() {
 
   if (authLoading) return <div className="loading-screen"><div className="loading-mark"><BookOpen size={25} /></div><span>Načítám kuchařku…</span></div>
   if (!session) return <AuthScreen />
+
+  // Supabase u pozvaných uživatelů vrací invited_at. Dokud si nenastaví
+  // vlastní heslo, zůstane přístup do kuchařky na této obrazovce.
+  const needsPasswordSetup = Boolean(
+    session.user?.invited_at &&
+    session.user?.user_metadata?.password_setup_complete !== true
+  )
+
+  if (needsPasswordSetup) {
+    return (
+      <PasswordSetupScreen
+        session={session}
+        onComplete={user => setSession(current => current ? { ...current, user } : current)}
+      />
+    )
+  }
 
   const selectedRecipe = selected ? recipes.find(r => r.id === selected.id) || selected : null
   const isOwner = selectedRecipe?.owner_id === session.user.id
